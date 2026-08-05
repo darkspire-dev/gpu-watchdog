@@ -1,0 +1,38 @@
+# Copy this to config.yaml and edit.
+
+ollama_url: "http://localhost:11434"
+
+# How to find crash/OOM log lines -- pick ONE of these three, leave the others null/omitted:
+service_name: "ollama"        # systemd unit name (journalctl -u <name> -f)
+# docker_container: "ollama"  # docker container name (docker logs -f <name>)
+# log_file: "/var/log/ollama.log"
+
+poll_interval_s: 15
+
+# License key unlocks: multiple alert channels at once, keep_alive-shortfall detection.
+# Leave blank for the free tier (one alert channel, core crash/thrash/herd/VRAM detectors).
+license_key: ""
+
+thresholds:
+  eviction_thrash_count: 4        # reloads within the window below to flag thrashing
+  eviction_thrash_window_s: 900
+  crash_loop_count: 3             # OOMs or restarts within the window below to flag a crash loop
+  crash_loop_window_s: 600
+  thundering_herd_count: 2        # concurrent cold loads within the window below
+  thundering_herd_window_s: 30
+  vram_pressure_pct: 95.0
+  vram_pressure_sustained_s: 120
+  keep_alive_baseline_s: 0        # pro feature: set to your configured OLLAMA_KEEP_ALIVE in seconds, e.g. 7200 for "2h"
+  keep_alive_shortfall_pct: 50.0
+
+alerts:
+  discord_webhook_url: ""   # Discord: Server Settings -> Integrations -> Webhooks
+  slack_webhook_url: ""     # pro feature if used alongside another channel
+  generic_webhook_url: ""   # any endpoint that accepts a JSON POST
+  smtp_host: ""
+  smtp_port: 587
+  smtp_user: ""
+  smtp_password: ""
+  smtp_from: ""
+  smtp_to: ""
+  cooldown_s: 1800          # don't re-alert the same condition more than once per 30 min
