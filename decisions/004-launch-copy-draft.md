@@ -45,7 +45,7 @@ open-sourced it
 > - (paid tier) keep_alive-shortfall detection — catches the exact bug above
 >
 > Free/open-core, MIT, all 5 detectors work in the free tier — the paid tier
-> ($39 one-time) just adds multi-channel alerting and that last detector. Source: [LINK]
+> ($39 one-time) just adds multi-channel alerting and that last detector. Source: https://github.com/darkspire-dev/gpu-watchdog
 >
 > Happy to answer questions about the detection logic or the original incident.
 
@@ -59,7 +59,7 @@ won't show you
 > 3am page: a small daemon that watches for eviction thrashing, cold-load storms after
 > a reboot, OOM crash loops, and sustained VRAM pressure — alerts to Discord/Slack/email.
 > Free and open-core (MIT). Built it after our own multi-GPU box kept crash-looping for
-> a genuinely dumb reason (details in the post/README). Source + free download: [LINK]
+> a genuinely dumb reason (details in the post/README). Source + free download: https://github.com/darkspire-dev/gpu-watchdog
 
 ## Show HN
 
@@ -75,9 +75,10 @@ self-hosted LLM servers
 > multi-channel alerting and one extra detector. Feedback on the detection logic
 > especially welcome — happy to go into the internals.
 
-## Open question for Rob
+## Resolved
 
-What should the public code-hosting identity be — a personal GitHub you already have,
-or a new one under the Darkspire name? Once that exists I'll mirror the repo, swap
-`[LINK]` for the real URL, and these are ready to post as-is (or edited first, your
-call).
+Public repo is live at `https://github.com/darkspire-dev/gpu-watchdog` (Rob created the
+account, provided a token 2026-08-05). Links above are filled in and real. These three
+posts are ready to submit as-is, or edited first — Rob's call before they actually go
+out, since posting under the company identity to public forums isn't something to do
+without a final look.
