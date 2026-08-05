@@ -1,0 +1,351 @@
+<title>GPU Watchdog — crash-loop &amp; eviction-thrashing monitor for self-hosted LLMs</title>
+<style>
+  :root {
+    --bg: #0c0f12;
+    --bg-raised: #15181c;
+    --bg-terminal: #0a0b0d;
+    --text: #e6e2d8;
+    --text-dim: #8a8f96;
+    --accent: #ffa733;
+    --accent-dim: #c9862c;
+    --ok: #4ade80;
+    --critical: #ff5c5c;
+    --border: #262b31;
+    --accent-contrast: #16110a;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  :root[data-theme="light"] {
+    --bg: #f2ede1;
+    --bg-raised: #ffffff;
+    --bg-terminal: #1c1a16;
+    --text: #211d15;
+    --text-dim: #6b6559;
+    --accent: #b45f09;
+    --accent-dim: #8f4a07;
+    --ok: #16794e;
+    --critical: #b3261e;
+    --border: #ddd4c0;
+    --accent-contrast: #fff7ec;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f2ede1;
+      --bg-raised: #ffffff;
+      --bg-terminal: #1c1a16;
+      --text: #211d15;
+      --text-dim: #6b6559;
+      --accent: #b45f09;
+      --accent-dim: #8f4a07;
+      --ok: #16794e;
+      --critical: #b3261e;
+      --border: #ddd4c0;
+      --accent-contrast: #fff7ec;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 24px; }
+  a { color: var(--accent); }
+
+  code, .mono { font-family: var(--mono); }
+
+  /* ---------- Nav ---------- */
+  nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 0;
+  }
+  .brand {
+    font-family: var(--mono); font-weight: 600; font-size: 15px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .brand-dot { width: 8px; height: 8px; background: var(--accent); flex: none; }
+  .nav-links { display: flex; gap: 24px; font-family: var(--mono); font-size: 13px; }
+  .nav-links a { text-decoration: none; color: var(--text-dim); }
+  .nav-links a:hover { color: var(--text); }
+
+  /* ---------- Hero ---------- */
+  .hero { padding: 40px 0 64px; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em;
+    color: var(--accent); text-transform: uppercase; margin: 0 0 16px;
+  }
+  h1 {
+    font-family: var(--mono); font-size: clamp(28px, 4.4vw, 44px);
+    line-height: 1.15; font-weight: 700; margin: 0 0 20px; max-width: 15ch;
+    text-wrap: balance;
+  }
+  .lede {
+    font-size: 18px; color: var(--text-dim); max-width: 56ch; margin: 0 0 32px;
+  }
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 48px; }
+  .btn {
+    font-family: var(--mono); font-size: 14px; font-weight: 600;
+    padding: 13px 20px; border-radius: 3px; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 8px;
+    border: 1px solid transparent; transition: transform 0.12s ease, opacity 0.12s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary { background: var(--accent); color: var(--accent-contrast); }
+  .btn-ghost { background: transparent; color: var(--text); border-color: var(--border); }
+  .btn-ghost:hover { border-color: var(--accent); }
+
+  /* ---------- Terminal ---------- */
+  .terminal {
+    background: var(--bg-terminal); border: 1px solid var(--border); border-radius: 8px;
+    overflow: hidden; box-shadow: 0 24px 60px -24px rgba(0,0,0,0.55);
+  }
+  .terminal-bar {
+    display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .terminal-dot { width: 10px; height: 10px; border-radius: 50%; background: #3a3f45; }
+  .terminal-title {
+    margin-left: 8px; font-family: var(--mono); font-size: 12px; color: #7a7f86;
+  }
+  .terminal-body {
+    padding: 20px 18px 24px; font-family: var(--mono); font-size: 13px;
+    color: #d7d3c8; min-height: 220px;
+  }
+  .terminal-body .line { opacity: 0; animation: reveal 0.01s linear forwards; white-space: pre-wrap; }
+  .tl-dim { color: #6f7580; }
+  .tl-warn { color: var(--accent); }
+  .tl-crit { color: var(--critical); font-weight: 600; }
+  .tl-ok { color: var(--ok); }
+  @keyframes reveal { to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .terminal-body .line { animation: none; opacity: 1; }
+  }
+
+  /* ---------- Sections ---------- */
+  section { padding: 56px 0; border-top: 1px solid var(--border); }
+  .tag {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em;
+    color: var(--text-dim); text-transform: uppercase; margin: 0 0 24px;
+  }
+  .tag::before { content: "[ "; color: var(--accent); }
+  .tag::after { content: " ]"; color: var(--accent); }
+  h2 {
+    font-family: var(--mono); font-size: clamp(22px, 3vw, 30px); margin: 0 0 16px;
+    text-wrap: balance;
+  }
+  p { max-width: 68ch; }
+
+  /* signal list */
+  .signals { display: flex; flex-direction: column; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-top: 24px; }
+  .signal { background: var(--bg-raised); padding: 16px 18px; display: grid; grid-template-columns: 160px 1fr; gap: 16px; align-items: start; }
+  .signal-name { font-family: var(--mono); font-size: 13px; font-weight: 600; }
+  .signal-name .pro-flag { font-family: var(--mono); font-size: 10px; color: var(--accent); border: 1px solid var(--accent-dim); border-radius: 3px; padding: 1px 5px; margin-left: 8px; letter-spacing: 0.04em; }
+  .signal-desc { color: var(--text-dim); font-size: 14px; }
+  @media (max-width: 620px) { .signal { grid-template-columns: 1fr; gap: 6px; } }
+
+  /* incident */
+  .incident-card {
+    background: var(--bg-raised); border: 1px solid var(--border); border-radius: 6px;
+    padding: 28px; margin-top: 24px;
+  }
+  .incident-card p { margin: 0 0 14px; }
+  .incident-card p:last-child { margin-bottom: 0; }
+  .incident-meta { font-family: var(--mono); font-size: 12px; color: var(--text-dim); margin-top: 18px; }
+
+  /* spec table */
+  table { width: 100%; border-collapse: collapse; margin-top: 24px; font-size: 14px; }
+  th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  th { font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; color: var(--text-dim); text-transform: uppercase; font-weight: 500; }
+  td:not(:first-child), th:not(:first-child) { text-align: center; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  td:first-child { color: var(--text-dim); }
+  .yes { color: var(--ok); }
+  .no { color: var(--text-dim); }
+  .table-scroll { overflow-x: auto; }
+
+  /* install */
+  .install-block {
+    background: var(--bg-terminal); color: #d7d3c8; border-radius: 6px; border: 1px solid var(--border);
+    padding: 20px; font-family: var(--mono); font-size: 13px; margin-top: 24px; overflow-x: auto;
+  }
+  .install-block .prompt { color: #6f7580; }
+  .install-block .comment { color: #6f7580; }
+  .install-block div { white-space: pre; }
+
+  /* pricing */
+  .price-card {
+    background: var(--bg-raised); border: 1px solid var(--border); border-radius: 8px;
+    padding: 32px; margin-top: 24px; display: flex; flex-wrap: wrap; gap: 28px; align-items: center; justify-content: space-between;
+  }
+  .price-amount { font-family: var(--mono); font-size: 40px; font-weight: 700; }
+  .price-amount span { font-size: 16px; color: var(--text-dim); font-weight: 500; }
+  .price-desc { color: var(--text-dim); font-size: 14px; max-width: 42ch; margin: 6px 0 0; }
+
+  footer { padding: 32px 0 56px; }
+  .footer-row {
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+    font-family: var(--mono); font-size: 12px; color: var(--text-dim);
+  }
+  footer a { color: var(--text-dim); }
+  footer a:hover { color: var(--accent); }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+  <nav>
+    <div class="brand"><span class="brand-dot"></span>gpu-watchdog</div>
+    <div class="nav-links">
+      <a href="#detectors">detectors</a>
+      <a href="#pricing">pricing</a>
+      <a href="http://172.16.0.19:3000/necromancer/gpu-watchdog" target="_blank" rel="noopener">source</a>
+    </div>
+  </nav>
+
+  <div class="hero">
+    <p class="eyebrow">for self-hosted Ollama / vLLM / llama.cpp servers</p>
+    <h1>Your GPU box died at 3am. Nothing watching it noticed.</h1>
+    <p class="lede">
+      GPU Watchdog watches the failure modes generic monitoring misses: models
+      fighting each other for VRAM, cold-load storms after a reboot, and crash
+      loops — then tells you before your users do.
+    </p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://buy.stripe.com/aFadRb41LcZHdYabJ65gc00">Get Pro — $39 one-time →</a>
+      <a class="btn btn-ghost" href="http://172.16.0.19:3000/necromancer/gpu-watchdog">Free / open-core on Gitea</a>
+    </div>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <span class="terminal-dot"></span><span class="terminal-dot"></span><span class="terminal-dot"></span>
+        <span class="terminal-title">journalctl -u ollama -f</span>
+      </div>
+      <div class="terminal-body" id="term"></div>
+    </div>
+  </div>
+
+  <section id="detectors">
+    <p class="tag">detectors</p>
+    <h2>Five things it watches that <code>nvidia-smi</code> alone won't tell you</h2>
+    <p style="color:var(--text-dim)">All five run in the free tier. A license unlocks multi-channel alerting and the keep_alive detector.</p>
+    <div class="signals">
+      <div class="signal">
+        <div class="signal-name">eviction thrashing</div>
+        <div class="signal-desc">A model keeps getting reloaded because it's fighting another model for VRAM, or its <code>keep_alive</code> isn't sticking.</div>
+      </div>
+      <div class="signal">
+        <div class="signal-name">thundering herd</div>
+        <div class="signal-desc">Multiple models cold-loading at once — usually right after a reboot — competing for disk/GPU bandwidth and making an already-healthy server look hung.</div>
+      </div>
+      <div class="signal">
+        <div class="signal-name">OOM crash loop</div>
+        <div class="signal-desc">Repeated CUDA out-of-memory errors or service restarts inside a short window — the difference between a one-off hiccup and something actively on fire.</div>
+      </div>
+      <div class="signal">
+        <div class="signal-name">VRAM pressure</div>
+        <div class="signal-desc">Memory pinned near the ceiling for longer than a grace period you set — the early warning before thrashing starts.</div>
+      </div>
+      <div class="signal">
+        <div class="signal-name">keep_alive shortfall <span class="pro-flag">PRO</span></div>
+        <div class="signal-desc">A model evicted far sooner than your configured <code>OLLAMA_KEEP_ALIVE</code> predicts — usually a client request silently overriding server policy.</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="incident">
+    <p class="tag">why this exists</p>
+    <h2>It's built from a real incident, not a feature checklist</h2>
+    <div class="incident-card">
+      <p>A multi-GPU Ollama box (three RTX 3060s and an old 1080) kept crash-looping under normal traffic. <code>nvidia-smi</code> looked fine between crashes. The dashboards looked fine. Nothing caught it until someone went digging in the logs by hand.</p>
+      <p>The real cause: <code>MAX_LOADED_MODELS</code> and <code>KEEP_ALIVE</code> were misconfigured on the server, and on top of that, three separate scripts were hardcoding <code>keep_alive: -1</code> on their own requests — silently overriding the server's policy on every call. The box wasn't unstable. It was being told to do something impossible, over and over, by code nobody remembered was still running.</p>
+      <p>That's the specific pattern this tool watches for: not "is the GPU busy," but "is something forcing this server to fight itself."</p>
+      <div class="incident-meta">— from an internal RAVEN-GPT postmortem, 2026</div>
+    </div>
+  </section>
+
+  <section id="tiers">
+    <p class="tag">free vs pro</p>
+    <h2>The free tier is not a trial</h2>
+    <p style="color:var(--text-dim)">All five detectors run either way. A license is for teams that want more than one alert channel.</p>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Capability</th><th>Free</th><th>Pro</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Core detectors (thrash / herd / crash-loop / VRAM)</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+          <tr><td>keep_alive-shortfall detector</td><td class="no">—</td><td class="yes">✓</td></tr>
+          <tr><td>Alert channels at once</td><td>1</td><td>Discord + Slack + email</td></tr>
+          <tr><td>License</td><td>MIT, self-hosted</td><td>MIT + license key</td></tr>
+          <tr><td>Price</td><td>$0</td><td>$39 one-time</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="install">
+    <p class="tag">install</p>
+    <h2>Running in under two minutes</h2>
+    <div class="install-block"><div><span class="prompt">$</span> git clone http://172.16.0.19:3000/necromancer/gpu-watchdog.git
+<span class="prompt">$</span> cd gpu-watchdog &amp;&amp; pip install -r requirements.txt
+<span class="prompt">$</span> cp config.example.yaml config.yaml   <span class="comment"># set ollama_url + a Discord/Slack webhook</span>
+<span class="prompt">$</span> python -m gpu_watchdog --config config.yaml</div></div>
+  </section>
+
+  <section id="pricing">
+    <p class="tag">pricing</p>
+    <h2>One price, no subscription</h2>
+    <div class="price-card">
+      <div>
+        <div class="price-amount">$39 <span>one-time, lifetime license</span></div>
+        <p class="price-desc">Multi-channel alerting + the keep_alive-shortfall detector. Delivered by email within minutes of purchase, automatically.</p>
+      </div>
+      <a class="btn btn-primary" href="https://buy.stripe.com/aFadRb41LcZHdYabJ65gc00">Buy Pro →</a>
+    </div>
+  </section>
+
+  <footer>
+    <div class="footer-row">
+      <span>Darkspire LLC · MIT licensed core</span>
+      <span><a href="http://172.16.0.19:3000/necromancer/gpu-watchdog">source</a> · <a href="mailto:necromancer@darkspire.net">necromancer@darkspire.net</a></span>
+    </div>
+  </footer>
+</div>
+
+<script>
+(function () {
+  var lines = [
+    ['12:50:24 raven-gpt ollama[8065]: loading model mistral:latest', 'tl-dim'],
+    ['12:50:26 raven-gpt ollama[8065]: loading model qwen3.6:latest', 'tl-dim'],
+    ['12:50:41 raven-gpt ollama[8065]: evicting mistral:latest (vram pressure)', 'tl-warn'],
+    ['12:50:55 raven-gpt ollama[8065]: loading model mistral:latest', 'tl-dim'],
+    ['12:51:10 raven-gpt ollama[8065]: evicting mistral:latest (vram pressure)', 'tl-warn'],
+    ['12:51:24 raven-gpt ollama[8065]: CUDA error: out of memory', 'tl-crit'],
+    ['12:51:24 raven-gpt systemd[1]: ollama-3060.service: Main process exited', 'tl-crit'],
+    ['12:51:31 raven-gpt systemd[1]: Started Ollama Service 3060.', 'tl-dim'],
+    ['[gpu-watchdog] WARNING Eviction thrashing: mistral:latest — reloaded 3x in 10 min', 'tl-warn'],
+    ['[gpu-watchdog] CRITICAL Crash loop detected (service restarts) — alert sent to #ops', 'tl-crit'],
+    ['[gpu-watchdog] ✓ alert delivered — 4:51am, before the first support ticket', 'tl-ok'],
+  ];
+  var el = document.getElementById('term');
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function render(i) {
+    if (i >= lines.length) return;
+    var d = document.createElement('div');
+    d.className = 'line ' + lines[i][1];
+    d.textContent = lines[i][0];
+    el.appendChild(d);
+    if (!reduced) {
+      setTimeout(function () { render(i + 1); }, i < 8 ? 260 : 460);
+    } else {
+      render(i + 1);
+    }
+  }
+  render(0);
+})();
+</script>
