@@ -11,7 +11,7 @@ import time
 # price point ($29-49 one-time) the goal is a light honesty gate for the "pro" features
 # (multi-node aggregation, >1 alert channel, historical export), not piracy-proofing.
 # See decisions/001-why-this-product.md.
-_DEFAULT_SECRET = "gpu-watchdog-dev-secret-CHANGE-IN-PROD"
+_DEFAULT_SECRET = "V9UdJQqnoTayN9HkICdgT1xj-4Rjymkgyzrz7NDpACs"
 
 
 def _secret() -> bytes:
